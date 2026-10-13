@@ -1,7 +1,8 @@
 from enum import Enum
 
 from command.command import Command
-from command.utils import parse_options
+from command.options.options_collection import OptionsCollection
+from command.options.options_parser import OptionsParser
 
 HIGH_BIT = 0x80
 ASCII_SPACE = 0x20
@@ -12,19 +13,19 @@ CARET_OFFSET = ord("@")
 class CatOption(Enum):
     """List the supported short flags for the cat command."""
 
-    NUMBER_LINES = "n"
-    NUMBER_NONBLANK = "b"
-    SQUEEZE_BLANK = "s"
-    SHOW_ENDS = "E"
-    SHOW_TABS = "T"
-    SHOW_NONPRINTING = "v"
-    SHOW_ALL = "A"
+    NUMBER_LINES = "-n"
+    NUMBER_NONBLANK = "-b"
+    SQUEEZE_BLANK = "-s"
+    SHOW_ENDS = "-E"
+    SHOW_TABS = "-T"
+    SHOW_NONPRINTING = "-v"
+    SHOW_ALL = "-A"
 
 
 class CatFormatter:
     """Format cat output while preserving line state across chunks."""
 
-    def __init__(self, options: set[CatOption]) -> None:
+    def __init__(self, options: OptionsCollection) -> None:
         """Store formatting options and initialize line numbering and blank state."""
         self.options = options
         self.line_number = 1
@@ -33,7 +34,7 @@ class CatFormatter:
 
     def format_chunk(self, chunk: str) -> str:
         """Apply the selected formatting options to the next text chunk."""
-        if not self.options:
+        if self.options.options_len() == 0:
             return chunk
         return "".join(self._format_character(character) for character in chunk)
 
@@ -45,7 +46,11 @@ class CatFormatter:
         if character == "\n":
             self.previous_blank = blank
             self.line_start = True
-            return prefix + ("$\n" if CatOption.SHOW_ENDS in self.options else "\n")
+            return prefix + (
+                "$\n"
+                if self.options.has_one_of_options([CatOption.SHOW_ENDS, CatOption.SHOW_ALL])
+                else "\n"
+            )
         self.line_start = False
         return prefix + self._display(character)
 
@@ -64,8 +69,12 @@ class CatFormatter:
 
     def _display(self, character: str) -> str:
         if character == "\t":
-            return "^I" if CatOption.SHOW_TABS in self.options else character
-        if CatOption.SHOW_NONPRINTING not in self.options:
+            return (
+                "^I"
+                if self.options.has_one_of_options([CatOption.SHOW_TABS, CatOption.SHOW_ALL])
+                else character
+            )
+        if not self.options.has_one_of_options([CatOption.SHOW_NONPRINTING, CatOption.SHOW_ALL]):
             return character
         return "".join(self._display_byte(byte) for byte in character.encode("utf-8"))
 
@@ -87,10 +96,23 @@ class CatCommand(Command):
 
     async def _execute_unsafe(self) -> None:
         """Parse cat options and write formatted input to the output stream."""
-        options, operands = parse_options(self.args, CatOption)
-        if CatOption.SHOW_ALL in options:
-            options.update({CatOption.SHOW_NONPRINTING, CatOption.SHOW_ENDS, CatOption.SHOW_TABS})
-        formatter = CatFormatter(options)
-        for path in self._input_paths(operands):
+        parse_result = self._argument_parser.parse(self.args)
+        formatter = CatFormatter(parse_result)
+        for path in self._input_paths(parse_result.get_operands()):
             async for chunk in self._read_chunks(path):
                 await self._write(formatter.format_chunk(chunk))
+
+    def _register_arguments(self) -> OptionsParser:
+        parser = OptionsParser()
+        parser.register_parameter(CatOption.NUMBER_LINES, CatOption.NUMBER_LINES.value, 0, False)
+        parser.register_parameter(
+            CatOption.NUMBER_NONBLANK, CatOption.NUMBER_NONBLANK.value, 0, False
+        )
+        parser.register_parameter(CatOption.SQUEEZE_BLANK, CatOption.SQUEEZE_BLANK.value, 0, False)
+        parser.register_parameter(CatOption.SHOW_ENDS, CatOption.SHOW_ENDS.value, 0, False)
+        parser.register_parameter(CatOption.SHOW_TABS, CatOption.SHOW_TABS.value, 0, False)
+        parser.register_parameter(
+            CatOption.SHOW_NONPRINTING, CatOption.SHOW_NONPRINTING.value, 0, False
+        )
+        parser.register_parameter(CatOption.SHOW_ALL, CatOption.SHOW_ALL.value, 0, False)
+        return parser

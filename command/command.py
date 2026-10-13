@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 
 import aiofiles
 
+from command.options.options_parser import OptionsParser
 from stream import InStream, OutStream
 from utils.exception import ExecutionError
 
@@ -17,6 +18,7 @@ class Command(ABC):
         self.args = args.copy()
         self.in_stream = in_stream
         self.out_stream = out_stream
+        self._argument_parser = self._register_arguments()
 
     async def _read_chunks(self, path: str | None = None) -> AsyncIterator[str]:
         try:
@@ -59,3 +61,6 @@ class Command(ABC):
         finally:
             await self.in_stream.close_from_reader()
             await self.out_stream.close_from_writer()
+
+    def _register_arguments(self) -> OptionsParser:
+        return OptionsParser()

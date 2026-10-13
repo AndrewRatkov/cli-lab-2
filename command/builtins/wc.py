@@ -2,17 +2,17 @@ import unicodedata
 from enum import Enum
 
 from command.command import Command
-from command.utils import parse_options
+from command.options.options_parser import OptionsParser
 
 
 class WcOption(Enum):
     """List the text measurements supported by the wc command."""
 
-    LINES = "l"
-    WORDS = "w"
-    CHARACTERS = "m"
-    BYTES = "c"
-    MAX_LINE_LENGTH = "L"
+    LINES = "-l"
+    WORDS = "-w"
+    CHARACTERS = "-m"
+    BYTES = "-c"
+    MAX_LINE_LENGTH = "-L"
 
 
 DEFAULT_OPTIONS = {WcOption.LINES, WcOption.WORDS, WcOption.BYTES}
@@ -74,13 +74,13 @@ class WcCommand(Command):
 
     async def _execute_unsafe(self) -> None:
         """Write counts for each input and totals when multiple inputs are given."""
-        options, operands = parse_options(self.args, WcOption)
-        options = options or DEFAULT_OPTIONS
-        order = [option for option in OUTPUT_ORDER if option in options]
-        paths = self._input_paths(operands)
+        parse_result = self._argument_parser.parse(self.args)
+        parse_result.set_default_options({option: [] for option in DEFAULT_OPTIONS})
+        order = [option for option in OUTPUT_ORDER if option in parse_result]
+        paths = self._input_paths(parse_result.get_operands())
         totals = dict.fromkeys(WcOption, 0)
         for path in paths:
-            counts = await self._count_input(path, WcOption.MAX_LINE_LENGTH in options)
+            counts = await self._count_input(path, WcOption.MAX_LINE_LENGTH in parse_result)
             self._accumulate(totals, counts)
             await self._write_counts([counts[option] for option in order], path)
         if len(paths) > 1:
@@ -104,3 +104,14 @@ class WcCommand(Command):
     async def _write_counts(self, counts: list[int], label: str | None) -> None:
         suffix = f" {label}" if label is not None else ""
         await self._write(" ".join(map(str, counts)) + suffix + "\n")
+
+    def _register_arguments(self) -> OptionsParser:
+        parser = OptionsParser()
+        parser.register_parameter(WcOption.LINES, WcOption.LINES.value, 0, False)
+        parser.register_parameter(WcOption.WORDS, WcOption.WORDS.value, 0, False)
+        parser.register_parameter(WcOption.CHARACTERS, WcOption.CHARACTERS.value, 0, False)
+        parser.register_parameter(WcOption.BYTES, WcOption.BYTES.value, 0, False)
+        parser.register_parameter(
+            WcOption.MAX_LINE_LENGTH, WcOption.MAX_LINE_LENGTH.value, 0, False
+        )
+        return parser
