@@ -1,7 +1,7 @@
 # HW1
 ![CI](https://github.com/ISArchitec/HW1/actions/workflows/ci.yml/badge.svg)
 
-Homework 1
+Homework CLI
 
 Требуется Python 3.13.
 

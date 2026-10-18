@@ -40,6 +40,11 @@ async def run_pipeline(monkeypatch, session):
     "source, expected",
     [
         pytest.param("echo hello | cat", "hello\n", id="copy-and-finish"),
+        pytest.param(
+            'echo -e "skip\\nHIT\\ncontext\\nend" | grep -wi -A 1 hit | wc -l',
+            "2\n",
+            id="grep-matching-and-context",
+        ),
         pytest.param("echo 123 | wc", "1 1 4\n", id="counts-after-eof"),
         pytest.param("echo -n | cat | wc -c", "0\n", id="empty-three-stage"),
         pytest.param("echo -n abc | cat | wc -lc", "0 3\n", id="no-final-newline"),

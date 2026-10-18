@@ -1,6 +1,13 @@
 from typing import ClassVar
 
-from command.builtins import CatCommand, EchoCommand, ExitCommand, PwdCommand, WcCommand
+from command.builtins import (
+    CatCommand,
+    EchoCommand,
+    ExitCommand,
+    GrepCommand,
+    PwdCommand,
+    WcCommand,
+)
 from command.command import Command
 from command.exec_command import ExecCommand
 from stream import InStream, OutStream
@@ -12,6 +19,7 @@ class CommandFactory:
 
     _commands: ClassVar[dict[str, type[Command]]] = {
         "cat": CatCommand,
+        "grep": GrepCommand,
         "echo": EchoCommand,
         "wc": WcCommand,
         "pwd": PwdCommand,
