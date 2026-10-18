@@ -423,3 +423,82 @@ async def test_external_closes_stdin_early(run_command):
     )
     output = await run_command([sys.executable, "-c", script], "x" * 2000000)
     assert output == "done"
+
+
+@pytest.mark.parametrize(
+    "args, expected",
+    [
+        (["Минимальный"], "Минимальный синтаксис grep\n"),
+        (["Минимальный$"], ""),
+        (["^Минимальный"], "Минимальный синтаксис grep\n"),
+        (["-i", "минимальный"], "Минимальный синтаксис grep\n"),
+        (["-w", "Минимал"], ""),
+        (["-A", "1", "II"], "II. Примеры\nСледующая строка\n"),  # noqa: RUF001
+    ],
+)
+async def test_grep_file_examples(run_command, tmp_path, args, expected):
+    path = tmp_path / "test_grep.txt"
+    path.write_bytes(
+        "Минимальный синтаксис grep\nI. Введение\nII. Примеры\nСледующая строка\nКонец\n".encode()  # noqa: RUF001
+    )
+    assert await run_command(["grep", *args, str(path)]) == expected
+
+
+@pytest.mark.parametrize(
+    "args, text, expected",
+    [
+        (["a[0-9]+$"], "a12\naX\nza3\n", "a12\nza3\n"),
+        (["-w", "кот"], "кот\nкотик\n_кот\nкот2\n(кот)\néкот\n", "кот\n(кот)\n"),  # noqa: RUF001
+        (["-wi", "кот"], "КОТ!\nкотик\n", "КОТ!\n"),  # noqa: RUF001
+        (["-w", "@"], "@\na@\n@b\n(@)\n", "@\n(@)\n"),
+        (["-w", "a|ab"], "ab\n", "ab\n"),
+        (["-w", "a.*"], "a b!c\n", "a b!c\n"),
+        (["-A", "0", "hit"], "hit\nother\n", "hit\n"),
+        (["-A", "2", "hit"], "hit\na\nhit\nb\nc\nd\n", "hit\na\nhit\nb\nc\n"),
+        (["-A1", "hit"], "hit\nhit\na\nb\n", "hit\nhit\na\n"),
+        (["-A", "10", "hit"], "skip\nhit\nlast", "hit\nlast"),
+        (["-A", "1", "hit"], "hit\na\nskip\nhit\nb\n", "hit\na\nhit\nb\n"),
+        (["^$"], "a\n\nb\n", "\n"),
+        ([""], "a\n\nlast", "a\n\nlast"),
+        ([""], "", ""),
+        (["last$"], "first\nlast", "last"),
+        (["--", "-i"], "-i\nother\n", "-i\n"),
+    ],
+)
+async def test_grep_matching_and_context(run_command, args, text, expected):
+    assert await run_command(["grep", *args], text) == expected
+
+
+@pytest.mark.parametrize("size", [1, 2, 5, 8192])
+async def test_grep_file_chunk_boundaries(run_command, tmp_path, size):
+    path = tmp_path / "input.txt"
+    line = "я" * 9000 + " match\n"
+    path.write_bytes(("skip\n" + line + "context\nlast").encode("utf-8"))
+    with patch("command.command.CHUNK_SIZE", size):
+        assert await run_command(["grep", "-A", "1", "match$", str(path)]) == line + "context\n"
+
+
+async def test_grep_context_resets_between_files(run_command, tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.write_bytes(b"hit\n")
+    second.write_bytes(b"skip\nhit\nlast\n")
+    assert await run_command(["grep", "-A", "2", "hit", str(first), str(second)]) == (
+        "hit\nhit\nlast\n"
+    )
+
+
+@pytest.mark.parametrize("args", [[], ["["], ["-A"], ["-A", "x", "a"], ["-A", "-1", "a"]])
+async def test_grep_invalid_arguments(run_command, args):
+    with pytest.raises(ExecutionError) as raised:
+        await run_command(["grep", *args])
+    assert raised.value.code == 1
+
+
+@pytest.mark.parametrize("data", [None, b"\xff"])
+async def test_grep_file_errors(run_command, tmp_path, data):
+    path = tmp_path / "input.txt"
+    if data is not None:
+        path.write_bytes(data)
+    with pytest.raises(ExecutionError) as raised:
+        await run_command(["grep", "a", str(path)])
+    assert raised.value.code == 1
