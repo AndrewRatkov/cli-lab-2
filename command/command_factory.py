@@ -2,6 +2,7 @@ from typing import ClassVar
 
 from command.builtins import (
     CatCommand,
+    CdCommand,
     EchoCommand,
     ExitCommand,
     GrepCommand,
@@ -19,6 +20,7 @@ class CommandFactory:
 
     _commands: ClassVar[dict[str, type[Command]]] = {
         "cat": CatCommand,
+        "cd": CdCommand,
         "grep": GrepCommand,
         "echo": EchoCommand,
         "wc": WcCommand,
@@ -34,4 +36,6 @@ class CommandFactory:
         command_type = self._commands.get(name)
         if command_type is None:
             return ExecCommand(words, in_stream, out_stream, session)
+        if command_type is CdCommand:
+            return CdCommand(args, in_stream, out_stream, session)
         return command_type(args, in_stream, out_stream)

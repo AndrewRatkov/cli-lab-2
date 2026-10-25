@@ -37,6 +37,73 @@ async def test_pwd(run_command):
         await run_command(["pwd"])
 
 
+@pytest.fixture
+def cd_directory(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PWD", str(tmp_path))
+    monkeypatch.delenv("OLDPWD", raising=False)
+    return tmp_path
+
+
+@pytest.mark.parametrize("relative", [True, False])
+async def test_cd_changes_directory(run_command, cd_directory, relative):
+    target = cd_directory / "directory with spaces"
+    target.mkdir()
+    (target / "example.txt").write_bytes(b"hello\n")
+    path = target.name if relative else str(target)
+    assert await run_command(["cd", path]) == ""
+    assert await run_command(["pwd"]) == str(target) + "\n"
+    assert await run_command(["cat", "example.txt"]) == "hello\n"
+    script = "import os; print(os.getcwd()); print(os.environ['PWD'])"
+    assert await run_command([sys.executable, "-c", script]) == (str(target) + "\n") * 2
+    assert await run_command(["cd", ".."]) == ""
+    assert os.getcwd() == str(cd_directory)
+
+
+async def test_cd_home(run_command, cd_directory, monkeypatch, session):
+    home = cd_directory / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    assert await run_command(["cd"]) == ""
+    assert os.getcwd() == str(home)
+    session.set("HOME", str(cd_directory))
+    assert await run_command(["cd"]) == ""
+    assert os.getcwd() == str(cd_directory)
+
+
+async def test_cd_previous_directory(run_command, cd_directory):
+    target = cd_directory / "target"
+    target.mkdir()
+    await run_command(["cd", str(target)])
+    assert os.environ["OLDPWD"] == str(cd_directory)
+    assert await run_command(["cd", "-"]) == str(cd_directory) + "\n"
+    assert os.getcwd() == str(cd_directory)
+    assert await run_command(["cd", "-"]) == str(target) + "\n"
+    assert os.getcwd() == str(target)
+
+
+@pytest.mark.parametrize("args", [[], ["-"], ["missing"], ["file"], ["a", "b"], [""], ["\0"]])
+async def test_cd_invalid_arguments(run_command, cd_directory, monkeypatch, args):
+    monkeypatch.delenv("HOME", raising=False)
+    (cd_directory / "file").write_bytes(b"text")
+    with pytest.raises(ExecutionError) as raised:
+        await run_command(["cd", *args])
+    assert raised.value.code == 1
+    assert os.getcwd() == str(cd_directory)
+    assert os.environ["PWD"] == str(cd_directory)
+    assert "OLDPWD" not in os.environ
+
+
+async def test_cd_permission_error(run_command, cd_directory):
+    with (
+        patch("command.builtins.cd.os.chdir", side_effect=PermissionError),
+        pytest.raises(ExecutionError) as raised,
+    ):
+        await run_command(["cd", "."])
+    assert raised.value.code == 1
+    assert os.getcwd() == str(cd_directory)
+
+
 async def test_exit(session):
     command = CommandFactory().create(["exit"], MemoryStream(), MemoryStream(), session)
     with pytest.raises(ExitInterrupt):
