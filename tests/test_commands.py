@@ -14,7 +14,7 @@ from utils.exception import ExecutionError, ExitInterrupt
 
 async def test_output_errors_become_execution_errors(session):
     error = OSError("write failed")
-    for words in [["cat"], ["cat", "-n"], ["echo", "hello"], ["wc"], ["pwd"]]:
+    for words in [["cat"], ["cat", "-n"], ["echo", "hello"], ["wc"], ["pwd"], ["ls"]]:
         source, output = (MemoryStream("hello\n"), MemoryStream())
         command = CommandFactory().create(words, source, output, session)
         with (
@@ -102,6 +102,63 @@ async def test_cd_permission_error(run_command, cd_directory):
         await run_command(["cd", "."])
     assert raised.value.code == 1
     assert os.getcwd() == str(cd_directory)
+
+
+@pytest.fixture
+def ls_directory(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    for name in ["b.txt", "a file.txt", ".hidden"]:
+        (tmp_path / name).write_bytes(b"text")
+    (tmp_path / "directory").mkdir()
+    (tmp_path / "directory" / "nested.txt").write_bytes(b"text")
+    return tmp_path
+
+
+async def test_ls_current_directory(run_command, ls_directory):
+    assert await run_command(["ls"]) == "a file.txt\nb.txt\ndirectory\n"
+    assert await run_command(["ls", "."]) == "a file.txt\nb.txt\ndirectory\n"
+
+
+@pytest.mark.parametrize("relative", [True, False])
+async def test_ls_directory_argument(run_command, ls_directory, relative):
+    path = "directory" if relative else str(ls_directory / "directory")
+    assert await run_command(["ls", path]) == "nested.txt\n"
+
+
+async def test_ls_file_argument(run_command, ls_directory):
+    assert await run_command(["ls", "b.txt"]) == "b.txt\n"
+    assert await run_command(["ls", ".hidden"]) == ".hidden\n"
+    path = str(ls_directory / "directory" / "nested.txt")
+    assert await run_command(["ls", path]) == path + "\n"
+
+
+async def test_ls_empty_directory(run_command, ls_directory):
+    (ls_directory / "empty").mkdir()
+    assert await run_command(["ls", "empty"]) == ""
+
+
+async def test_ls_follows_cd(run_command, ls_directory, monkeypatch):
+    monkeypatch.setenv("PWD", str(ls_directory))
+    monkeypatch.delenv("OLDPWD", raising=False)
+    await run_command(["cd", "directory"])
+    assert await run_command(["ls"]) == "nested.txt\n"
+    assert await run_command(["ls", ".."]) == "a file.txt\nb.txt\ndirectory\n"
+
+
+@pytest.mark.parametrize("args", [["missing"], ["a", "b"], ["-l"], [""], ["\0"]])
+async def test_ls_invalid_arguments(run_command, ls_directory, args):
+    with pytest.raises(ExecutionError) as raised:
+        await run_command(["ls", *args])
+    assert raised.value.code == 2
+
+
+async def test_ls_permission_error(run_command, ls_directory):
+    with (
+        patch("command.builtins.ls.os.listdir", side_effect=PermissionError),
+        pytest.raises(ExecutionError) as raised,
+    ):
+        await run_command(["ls"])
+    assert raised.value.code == 2
 
 
 async def test_exit(session):

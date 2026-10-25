@@ -80,6 +80,13 @@ async def test_cd_in_pipeline_does_not_change_directory(
     assert os.getcwd() == str(tmp_path)
 
 
+async def test_ls_pipeline(run_pipeline, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    for name in ["one.txt", "two.txt", "other.md"]:
+        (tmp_path / name).write_bytes(b"")
+    assert await run_pipeline("ls | grep txt | wc -l") == "2\n"
+
+
 async def test_file_pipeline_crosses_queue_capacity(run_pipeline, tmp_path):
     path = tmp_path / "many lines.txt"
     path.write_bytes(b"a b\n" * 250000)

@@ -6,6 +6,7 @@ from command.builtins import (
     EchoCommand,
     ExitCommand,
     GrepCommand,
+    LsCommand,
     PwdCommand,
     WcCommand,
 )
@@ -22,6 +23,7 @@ class CommandFactory:
         "cat": CatCommand,
         "cd": CdCommand,
         "grep": GrepCommand,
+        "ls": LsCommand,
         "echo": EchoCommand,
         "wc": WcCommand,
         "pwd": PwdCommand,
