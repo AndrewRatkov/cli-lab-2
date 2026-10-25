@@ -1,6 +1,7 @@
 """Real parser -> sentence sequence -> commands -> Pipe integration tests."""
 
 import asyncio
+import os
 import sys
 
 import pytest
@@ -65,6 +66,25 @@ async def test_example_file_pipeline(run_pipeline, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "example.txt").write_bytes(b"Some example text\n")
     assert await run_pipeline("cat example.txt | wc") == "1 3 18\n"
+
+
+@pytest.mark.parametrize("source", ["cd target | pwd", "echo hello | cd target"])
+async def test_cd_in_pipeline_does_not_change_directory(
+    run_pipeline, tmp_path, monkeypatch, source
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "target").mkdir()
+    with pytest.raises(ExecutionError) as raised:
+        await run_pipeline(source)
+    assert raised.value.code == 1
+    assert os.getcwd() == str(tmp_path)
+
+
+async def test_ls_pipeline(run_pipeline, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    for name in ["one.txt", "two.txt", "other.md"]:
+        (tmp_path / name).write_bytes(b"")
+    assert await run_pipeline("ls | grep txt | wc -l") == "2\n"
 
 
 async def test_file_pipeline_crosses_queue_capacity(run_pipeline, tmp_path):

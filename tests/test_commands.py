@@ -14,7 +14,7 @@ from utils.exception import ExecutionError, ExitInterrupt
 
 async def test_output_errors_become_execution_errors(session):
     error = OSError("write failed")
-    for words in [["cat"], ["cat", "-n"], ["echo", "hello"], ["wc"], ["pwd"]]:
+    for words in [["cat"], ["cat", "-n"], ["echo", "hello"], ["wc"], ["pwd"], ["ls"]]:
         source, output = (MemoryStream("hello\n"), MemoryStream())
         command = CommandFactory().create(words, source, output, session)
         with (
@@ -35,6 +35,130 @@ async def test_pwd(run_command):
         pytest.raises(ExecutionError),
     ):
         await run_command(["pwd"])
+
+
+@pytest.fixture
+def cd_directory(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PWD", str(tmp_path))
+    monkeypatch.delenv("OLDPWD", raising=False)
+    return tmp_path
+
+
+@pytest.mark.parametrize("relative", [True, False])
+async def test_cd_changes_directory(run_command, cd_directory, relative):
+    target = cd_directory / "directory with spaces"
+    target.mkdir()
+    (target / "example.txt").write_bytes(b"hello\n")
+    path = target.name if relative else str(target)
+    assert await run_command(["cd", path]) == ""
+    assert await run_command(["pwd"]) == str(target) + "\n"
+    assert await run_command(["cat", "example.txt"]) == "hello\n"
+    script = "import os; print(os.getcwd()); print(os.environ['PWD'])"
+    assert await run_command([sys.executable, "-c", script]) == (str(target) + "\n") * 2
+    assert await run_command(["cd", ".."]) == ""
+    assert os.getcwd() == str(cd_directory)
+
+
+async def test_cd_home(run_command, cd_directory, monkeypatch, session):
+    home = cd_directory / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    assert await run_command(["cd"]) == ""
+    assert os.getcwd() == str(home)
+    session.set("HOME", str(cd_directory))
+    assert await run_command(["cd"]) == ""
+    assert os.getcwd() == str(cd_directory)
+
+
+async def test_cd_previous_directory(run_command, cd_directory):
+    target = cd_directory / "target"
+    target.mkdir()
+    await run_command(["cd", str(target)])
+    assert os.environ["OLDPWD"] == str(cd_directory)
+    assert await run_command(["cd", "-"]) == str(cd_directory) + "\n"
+    assert os.getcwd() == str(cd_directory)
+    assert await run_command(["cd", "-"]) == str(target) + "\n"
+    assert os.getcwd() == str(target)
+
+
+@pytest.mark.parametrize("args", [[], ["-"], ["missing"], ["file"], ["a", "b"], [""], ["\0"]])
+async def test_cd_invalid_arguments(run_command, cd_directory, monkeypatch, args):
+    monkeypatch.delenv("HOME", raising=False)
+    (cd_directory / "file").write_bytes(b"text")
+    with pytest.raises(ExecutionError) as raised:
+        await run_command(["cd", *args])
+    assert raised.value.code == 1
+    assert os.getcwd() == str(cd_directory)
+    assert os.environ["PWD"] == str(cd_directory)
+    assert "OLDPWD" not in os.environ
+
+
+async def test_cd_permission_error(run_command, cd_directory):
+    with (
+        patch("command.builtins.cd.os.chdir", side_effect=PermissionError),
+        pytest.raises(ExecutionError) as raised,
+    ):
+        await run_command(["cd", "."])
+    assert raised.value.code == 1
+    assert os.getcwd() == str(cd_directory)
+
+
+@pytest.fixture
+def ls_directory(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    for name in ["b.txt", "a file.txt", ".hidden"]:
+        (tmp_path / name).write_bytes(b"text")
+    (tmp_path / "directory").mkdir()
+    (tmp_path / "directory" / "nested.txt").write_bytes(b"text")
+    return tmp_path
+
+
+async def test_ls_current_directory(run_command, ls_directory):
+    assert await run_command(["ls"]) == "a file.txt\nb.txt\ndirectory\n"
+    assert await run_command(["ls", "."]) == "a file.txt\nb.txt\ndirectory\n"
+
+
+@pytest.mark.parametrize("relative", [True, False])
+async def test_ls_directory_argument(run_command, ls_directory, relative):
+    path = "directory" if relative else str(ls_directory / "directory")
+    assert await run_command(["ls", path]) == "nested.txt\n"
+
+
+async def test_ls_file_argument(run_command, ls_directory):
+    assert await run_command(["ls", "b.txt"]) == "b.txt\n"
+    assert await run_command(["ls", ".hidden"]) == ".hidden\n"
+    path = str(ls_directory / "directory" / "nested.txt")
+    assert await run_command(["ls", path]) == path + "\n"
+
+
+async def test_ls_empty_directory(run_command, ls_directory):
+    (ls_directory / "empty").mkdir()
+    assert await run_command(["ls", "empty"]) == ""
+
+
+async def test_ls_follows_cd(run_command, ls_directory, monkeypatch):
+    monkeypatch.setenv("PWD", str(ls_directory))
+    monkeypatch.delenv("OLDPWD", raising=False)
+    await run_command(["cd", "directory"])
+    assert await run_command(["ls"]) == "nested.txt\n"
+    assert await run_command(["ls", ".."]) == "a file.txt\nb.txt\ndirectory\n"
+
+
+@pytest.mark.parametrize("args", [["missing"], ["a", "b"], ["-l"], [""], ["\0"]])
+async def test_ls_invalid_arguments(run_command, ls_directory, args):
+    with pytest.raises(ExecutionError) as raised:
+        await run_command(["ls", *args])
+    assert raised.value.code == 2
+
+
+async def test_ls_permission_error(run_command, ls_directory):
+    with (
+        patch("command.builtins.ls.os.listdir", side_effect=PermissionError),
+        pytest.raises(ExecutionError) as raised,
+    ):
+        await run_command(["ls"])
+    assert raised.value.code == 2
 
 
 async def test_exit(session):

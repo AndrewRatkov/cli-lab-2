@@ -41,6 +41,28 @@ async def test_assignment_survives_between_commands(monkeypatch, tmp_path, capsy
     assert capsys.readouterr().out == "Some example text\n"
 
 
+async def test_cd_survives_between_commands(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PWD", str(tmp_path))
+    monkeypatch.delenv("OLDPWD", raising=False)
+    target = tmp_path / "directory with spaces"
+    target.mkdir()
+    (target / "example.txt").write_bytes(b"hello\n")
+    await run_interpreter(['cd "directory with spaces"', "pwd", "cat example.txt", "exit"])
+    assert capsys.readouterr().out == str(target) + "\nhello\n"
+
+
+async def test_ls_after_cd(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PWD", str(tmp_path))
+    monkeypatch.delenv("OLDPWD", raising=False)
+    target = tmp_path / "directory with spaces"
+    target.mkdir()
+    (target / "example.txt").write_bytes(b"hello\n")
+    await run_interpreter(['cd "directory with spaces"', "ls", "ls ..", "exit"])
+    assert capsys.readouterr().out == "example.txt\ndirectory with spaces\n"
+
+
 async def test_unexpected_error_is_reported_and_loop_continues(capsys):
     exit_sequence = Parser(Session()).parse("exit")
     with patch(
